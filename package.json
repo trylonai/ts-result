@@ -1,6 +1,6 @@
 {
   "name": "@trylonai/ts-result",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Rust's Result type for type-safe error handling in TypeScript.",
   "main": "./dist/cjs/index.cjs",
   "author": "Kerim Buyukakyuz <kerim@trylon.ai>",
@@ -19,17 +19,17 @@
     "docs:generate": "typedoc"
   },
   "type": "module",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/types/index.d.ts",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
       },
       "require": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/cjs/index.cjs"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
       }
     }
   },
