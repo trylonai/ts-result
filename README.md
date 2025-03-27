@@ -47,7 +47,7 @@ pnpm add @trylonai/ts-result
 ## Basic Usage
 
 ```ts
-import { Ok, Err, Result } from 'ts-result';
+import { Ok, Err, Result } from '@trylonai/ts-result';
 
 // Function returning a Result
 function divide(
