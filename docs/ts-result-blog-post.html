@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Explore Trylon AI's journey from custom error objects to ts-result, an open-source TypeScript library implementing Rust's Result pattern for explicit, type-safe error handling.">
+    <title>Evolving Our Error Handling: Why We Built ts-result, a Rust-Inspired Result Type for TypeScript</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/typescript.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        header {
+            margin-bottom: 40px;
+        }
+        h1 {
+            color: #2c3e50;
+            font-size: 2.2em;
+            line-height: 1.3;
+        }
+        h2 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            font-size: 1.6em;
+        }
+        .author {
+            font-style: italic;
+            color: #7f8c8d;
+            margin-bottom: 2em;
+        }
+        pre {
+            background-color: #282c34;
+            border-radius: 5px;
+            padding: 16px;
+            overflow: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            background-color: #f0f0f0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #abb2bf;
+        }
+        .hljs-keyword {
+            color: #c678dd;
+        }
+        .hljs-string {
+            color: #98c379;
+        }
+        .hljs-comment {
+            color: #5c6370;
+            font-style: italic;
+        }
+        .hljs-function {
+            color: #61afef;
+        }
+        .hljs-number {
+            color: #d19a66;
+        }
+        .hljs-operator, .hljs-punctuation {
+            color: #abb2bf;
+        }
+        .hljs-boolean, .hljs-constant {
+            color: #d19a66;
+        }
+        .hljs-class, .hljs-title {
+            color: #e5c07b;
+        }
+        .hljs-params {
+            color: #d19a66;
+        }
+        .hljs-type, .hljs-built_in {
+            color: #56b6c2;
+        }
+        footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        ul {
+            padding-left: 25px;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .links {
+            margin-top: 20px;
+        }
+        .note {
+            background-color: #f8f9fa;
+            border-left: 4px solid #61afef;
+            padding: 12px 16px;
+            margin: 20px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        .code-comment {
+            color: #5c6370;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Evolving Our Error Handling: Why We Built ts-result, a Rust-Inspired Result Type for TypeScript</h1>
+        <div class="author">By Kerim Buyukakyuz</div>
+    </header>
+    
+    <main>
+        <p>Error handling. It's one of those fundamental aspects of software development that can significantly impact reliability and maintainability, yet the "best" approach often feels elusive, especially in flexible languages like TypeScript. Here at Trylon AI, as we built out our platform, we went through a distinct evolution in how we handled operations that could fail, culminating in an open-source library we call <code>ts-result</code>. This is the story of how we got there.</p>
+
+        <h2>The Starting Point: <code>try-catch</code> and Ambiguity</h2>
+        <p>Like many TypeScript projects, our initial codebase relied heavily on standard JavaScript patterns. This often meant:</p>
+        <ol>
+            <li>Liberal use of <code>try-catch</code> blocks, especially around database interactions, API calls, or complex business logic.</li>
+            <li>Functions sometimes returning <code>null</code> or <code>undefined</code> to signal "not found" or other non-successful states.</li>
+        </ol>
+
+        <p>While functional, these approaches had drawbacks:</p>
+        <ul>
+            <li><code>try-catch</code> blocks, while necessary for unexpected runtime errors, often made the primary logic flow harder to follow when used for predictable, non-exceptional failures.</li>
+            <li>Returning <code>null</code> was ambiguous. Did it mean "no user found" (a valid outcome) or "database query failed"? This required careful checking and context-dependent interpretation.</li>
+        </ul>
+
+        <p>Consider a typical API route handler using these patterns:</p>
+        <pre><code>// Simplified early version
+export async function GET(request: Request) {
+  try {
+    // Auth might throw or return null
+    const user = await validateAuth(request);
+    if (!user) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        message: 'User not found' 
+      }), { status: 401 });
+    }
+
+    // Database call might throw
+    const userData = await database.getUser(user.id);
+    if (!userData) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        message: 'User data not found' 
+      }), { status: 404 });
+    }
+
+    return new Response(JSON.stringify({ 
+      success: true, 
+      data: userData 
+    }), { status: 200 });
+  } catch (error: any) {
+    console.error('Error:', error);
+    // Which error was it? Auth? DB? Validation?
+    const statusCode = error.status || 500;
+    const message = error.message || 'An unexpected error occurred';
+    
+    return new Response(JSON.stringify({ 
+      success: false, 
+      message 
+    }), { status: statusCode });
+  }
+}</code></pre>
+
+        <p>This pattern works, but has several issues:</p>
+        <ul>
+            <li>Error handling logic is scattered throughout the function</li>
+            <li>The <code>catch</code> block handles a mix of expected and unexpected errors</li>
+            <li>Type safety is limited with generic error objects</li>
+            <li>The function's return type doesn't express that it could fail in specific ways</li>
+        </ul>
+
+        <h2>Step 1: Explicit Outcome Objects - Our Internal <code>Result</code></h2>
+        <p>To make function outcomes more explicit, we introduced a simple internal pattern. We defined interfaces for <code>Success</code> and <code>Failure</code> and used factory functions to create them:</p>
+
+        <pre><code>// Our internal types (simplified)
+interface Success&lt;T&gt; {
+  success: true;
+  data: T;
+  metadata?: Record&lt;string, string&gt;;
+}
+
+interface Failure {
+  success: false;
+  message: string;
+  httpStatusCode?: number; // For API responses
+  metadata?: Record&lt;string, string&gt;;
+}
+
+type Result&lt;T&gt; = Success&lt;T&gt; | Failure;
+
+// Factory functions
+const Results = {
+  success&lt;T&gt;(data: T, metadata?: Record&lt;string, string&gt;): Success&lt;T&gt; {
+    return { success: true, data, metadata };
+  },
+  
+  failure(
+    message: string,
+    httpStatusCode?: number,
+    metadata?: Record&lt;string, string&gt;
+  ): Failure {
+    return { success: false, message, httpStatusCode, metadata };
+  },
+  
+  // A helper for chaining Results
+  async chain&lt;T, U&gt;(
+    result: Result&lt;T&gt;,
+    fn: (data: T) => Promise&lt;Result&lt;U&gt;&gt;
+  ): Promise&lt;Result&lt;U&gt;&gt; {
+    if (!result.success) {
+      return result; // Return the failure unchanged
+    }
+    return await fn(result.data);
+  },
+};</code></pre>
+
+        <p>Our service methods started returning <code>Promise&lt;Result&lt;T&gt;&gt;</code>. This was a definite improvement. The function signature now hinted at a binary outcome, and we could carry specific error messages and status codes.</p>
+
+        <p>Our API service code began to look like this:</p>
+
+        <pre><code>// Example service method using internal Result
+import { Result, Results } from './types';
+
+export class UserService {
+  public static async getUser(
+    userId: string
+  ): Promise&lt;Result&lt;User&gt;&gt; {
+    try {
+      const user = await db.collection('users').findOne({ id: userId });
+
+      if (!user) {
+        // Explicit failure for "not found"
+        return Results.failure('User not found', 404);
+      }
+
+      // Explicit success
+      return Results.success(user);
+    } catch (error) {
+      // Catch unexpected DB errors
+      console.error('Error fetching user:', error);
+      return Results.failure('Error fetching user', 500);
+    }
+  }
+  
+  public static async updateProfile(
+    userId: string, 
+    profileData: ProfileUpdate
+  ): Promise&lt;Result&lt;User&gt;&gt; {
+    // Input validation
+    if (!profileData.name?.trim()) {
+      return Results.failure('Name is required', 400);
+    }
+    
+    try {
+      // First get the user
+      const userResult = await UserService.getUser(userId);
+      
+      // The ubiquitous check
+      if (!userResult.success) {
+        return userResult; // Early return on failure
+      }
+      
+      const user = userResult.data;
+      
+      // Update the user
+      const updatedUser = await db.collection('users').findOneAndUpdate(
+        { id: userId },
+        { $set: { ...profileData, updatedAt: new Date() } },
+        { returnDocument: 'after' }
+      );
+      
+      if (!updatedUser) {
+        return Results.failure('Failed to update user', 500);
+      }
+      
+      return Results.success(updatedUser);
+    } catch (error) {
+      console.error('Error updating user:', error);
+      return Results.failure('Failed to update user', 500);
+    }
+  }
+}</code></pre>
+
+        <p>This approach provided several benefits:</p>
+        <ul>
+            <li>Explicit success and failure states with discriminated union types</li>
+            <li>Error messages and status codes carried with the result</li>
+            <li>Better type safety throughout the codebase</li>
+            <li>Clearer function signatures that advertise possible failure</li>
+        </ul>
+        
+        <p>However, notice the repeated <code>if (!result.success) { return result; }</code> pattern. While clear, it felt verbose, especially when chaining multiple operations that could each fail. Our <code>Results.chain</code> helper helped somewhat, but didn't fully solve the desire for smoother composition:</p>
+
+        <pre><code>// Using our chain helper
+async function processUserData(userId: string): Promise&lt;Result&lt;ProcessedData&gt;&gt; {
+  const userResult = await UserService.getUser(userId);
+  
+  // Chain additional operations that might fail
+  return await Results.chain(userResult, async (user) => {
+    const preferencesResult = await PreferenceService.getUserPreferences(userId);
+    
+    // Still need nested checks
+    if (!preferencesResult.success) {
+      return preferencesResult;
+    }
+    
+    const preferences = preferencesResult.data;
+    
+    // Process and return
+    return Results.success({
+      userName: user.name,
+      theme: preferences.theme,
+      // Other processed data...
+    });
+  });
+}</code></pre>
+
+        <h2>The "Aha!" Moment: Embracing Rust's <code>Result</code></h2>
+        <p>As we used and refined our internal <code>Result</code> type, we noticed the pattern strongly resembled the <code>Result&lt;T, E&gt;</code> enum from Rust, a language admired for its robust error handling.</p>
+
+        <p>Rust's <code>Result</code> isn't just about the <code>Ok(T)</code> and <code>Err(E)</code> variants; it's about the rich set of <strong>methods</strong> defined on the type (<code>map</code>, <code>and_then</code>, <code>or_else</code>, <code>unwrap_or</code>, etc.). These methods allow for powerful functional composition, letting you transform successes, handle errors, chain operations, and provide defaults, all without explicit <code>if/else</code> checks for the success/failure state.</p>
+
+        <p>We realized that instead of incrementally adding these methods to our custom type, we could gain a lot by adopting the well-defined semantics and battle-tested API design of Rust's <code>Result</code>. There's something elegant about the way Rust handles errors as values that can be passed around, transformed, and dealt with explicitly rather than exceptions that jump across the call stack.</p>
+        
+        <p>Of course, we weren't the first to have this realization. Several TypeScript libraries already implement similar patterns (like neverthrow, True Myth, and the more comprehensive Effect-ts). But after evaluating these options, we found some were unmaintained, others had different API designs than what we wanted, and some were part of larger functional programming ecosystems that would require a bigger shift in our codebase. We decided to build our own focused implementation that would fit our specific needs and existing patterns.</p>
+
+        <h2>Building <code>ts-result</code></h2>
+        <p>This led us to create <code>ts-result</code>, our open-source implementation. The goals were:</p>
+
+        <ol>
+            <li><strong>Faithful Implementation:</strong> Mirror the core API and behavior of Rust's <code>Result&lt;T, E&gt;</code>.</li>
+            <li><strong>TypeScript Idioms:</strong> Leverage TypeScript's discriminated unions, type guards, and generics effectively.</li>
+            <li><strong>Modern Tooling:</strong> Provide dual ESM/CJS support via <code>package.json</code> exports and ensure good JSDoc documentation.</li>
+            <li><strong>Lightweight & Focused:</strong> Provide <em>just</em> the <code>Result</code> pattern without bundling it into a larger functional programming library.</li>
+        </ol>
+
+        <p>Here's a simplified look at our implementation:</p>
+
+        <pre><code>// Core Result type definition
+export type Result&lt;T, E = unknown&gt; = Ok&lt;T, E&gt; | Err&lt;T, E&gt;;
+
+// Ok variant - represents success
+export class OkImpl&lt;T, E = never&gt; {
+  readonly _tag = 'Ok';
+  public readonly value: T;
+
+  constructor(value: T) {
+    this.value = value;
+  }
+
+  isOk(): this is Ok&lt;T, E&gt; {
+    return true;
+  }
+
+  isErr(): this is Err&lt;T, E&gt; {
+    return false;
+  }
+
+  // Transform the success value
+  map&lt;U&gt;(mapper: (value: T) => U): Result&lt;U, E&gt; {
+    return new OkImpl(mapper(this.value));
+  }
+
+  // Chain with another operation that might fail
+  andThen&lt;U&gt;(op: (value: T) => Result&lt;U, E&gt;): Result&lt;U, E&gt; {
+    return op(this.value);
+  }
+
+  // Many more methods...
+}
+
+// Err variant - represents failure
+export class ErrImpl&lt;T = never, E = unknown&gt; {
+  readonly _tag = 'Err';
+  public readonly error: E;
+
+  constructor(error: E) {
+    this.error = error;
+  }
+
+  isOk(): this is Ok&lt;T, E&gt; {
+    return false;
+  }
+
+  isErr(): this is Err&lt;T, E&gt; {
+    return true;
+  }
+
+  // Pass through any transformation of the success value
+  map&lt;U&gt;(_mapper: (value: T) => U): Result&lt;U, E&gt; {
+    return this as unknown as Result&lt;U, E&gt;;
+  }
+
+  // Transform the error value
+  mapErr&lt;F&gt;(mapper: (error: E) => F): Result&lt;T, F&gt; {
+    return new ErrImpl(mapper(this.error));
+  }
+
+  // Many more methods...
+}
+
+// Type aliases
+export type Ok&lt;T, E = unknown&gt; = OkImpl&lt;T, E&gt;;
+export type Err&lt;T = never, E = unknown&gt; = ErrImpl&lt;T, E&gt;;
+
+// Factory functions
+export function Ok&lt;T&gt;(value: T): Ok&lt;T, never&gt; {
+  return new OkImpl(value);
+}
+
+export function Err&lt;E&gt;(error: E): Err&lt;never, E&gt; {
+  return new ErrImpl(error);
+}</code></pre>
+
+        <p>With <code>ts-result</code>, our example transforms to a more functional, composable style:</p>
+
+        <pre><code>import { Ok, Err, Result } from '@trylonai/ts-result';
+
+interface UserError {
+  message: string;
+  statusCode: number;
+}
+
+class UserService {
+  static async getUser(userId: string): Promise&lt;Result&lt;User, UserError&gt;&gt; {
+    try {
+      const user = await db.collection('users').findOne({ id: userId });
+
+      if (!user) {
+        return Err({ 
+          message: 'User not found', 
+          statusCode: 404 
+        });
+      }
+
+      return Ok(user);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      return Err({ 
+        message: 'Error fetching user', 
+        statusCode: 500 
+      });
+    }
+  }
+}
+
+async function processUserData(userId: string): Promise&lt;Result&lt;ProcessedData, UserError&gt;&gt; {
+  // Start with getting the user
+  const userResult = await UserService.getUser(userId);
+  
+  // Chain operations with andThen for a more linear flow
+  return userResult.andThen(user => 
+    // Only runs if userResult is Ok
+    PreferenceService.getUserPreferences(userId)
+      // Transform the preferences if that succeeded
+      .map(preferences => ({
+        userName: user.name,
+        theme: preferences.theme,
+        // Other processed data...
+      }))
+  );
+}</code></pre>
+
+        <p>This approach provides several major benefits:</p>
+        <ul>
+            <li><strong>Explicit Error Types:</strong> The <code>E</code> generic parameter enforces consistent error types</li>
+            <li><strong>Chainable Operations:</strong> Methods like <code>map</code>, <code>andThen</code>, <code>orElse</code> make compositions cleaner</li>
+            <li><strong>Less Branching Logic:</strong> Fewer explicit if-statements checking for success/failure</li>
+            <li><strong>Enhanced Type Safety:</strong> TypeScript can track success and error types through transformations</li>
+            <li><strong>Focus on Happy Path:</strong> You can write your primary logic flow without error handling disruptions</li>
+        </ul>
+        
+        <p>But there are challenges too. TypeScript doesn't enforce exhaustive matching on discriminated unions the way Rust does with its pattern matching, so it's possible to forget to handle a Result entirely. Additionally, since TypeScript/JavaScript has built-in exceptions, you'll inevitably need to deal with both paradigms in the same codebase. We've found some patterns that help with this dual reality:</p>
+
+        <p>To help bridge these worlds, we added some utility functions to our implementation:</p>
+
+        <pre><code>// Safely wrap functions that might throw exceptions
+export function catches&lt;T, E = unknown&gt;(fn: () => T): Result&lt;T, E&gt; {
+  try {
+    return Ok(fn());
+  } catch (error) {
+    return Err(error as E);
+  }
+}
+
+// Async version for Promise-returning functions
+export async function catchesAsync&lt;T, E = unknown&gt;(
+  fn: () => Promise&lt;T&gt;
+): Promise&lt;Result&lt;T, E&gt;&gt; {
+  try {
+    return Ok(await fn());
+  } catch (error) {
+    return Err(error as E);
+  }
+}</code></pre>
+
+        <p>Using this approach, our API handler becomes:</p>
+
+        <pre><code>export async function GET(request: Request) {
+  // Authentication returns a Result
+  const authResult = await validateAuth(request);
+  
+  // Process the request using Result methods for composition
+  const response = await authResult
+    .andThen(user => UserService.getUser(user.id))
+    .match({
+      // Handle success case
+      Ok: (userData) => new Response(
+        JSON.stringify({ success: true, data: userData }),
+        { status: 200 }
+      ),
+      
+      // Handle error case
+      Err: (error) => new Response(
+        JSON.stringify({ success: false, message: error.message }),
+        { status: error.statusCode }
+      )
+    });
+  
+  return response;
+}</code></pre>
+
+        <p>The code is now more declarative, with error handling naturally integrated into the flow rather than scattered throughout the function. By using <code>match()</code> at the boundary of our system, we can ensure we're handling both success and error states comprehensively.</p>
+        
+        <div class="note">
+          <p><strong>Tip:</strong> We've found that <code>Result</code> works best when applied within well-defined boundaries of your application. We use it heavily in our domain logic and service layer, while still letting exceptions flow naturally in infrastructure code or when integrating with third-party libraries. The key is having clear adapter boundaries where you convert between these paradigms.</p>
+        </div>
+
+        <h2>Why Build Our Own? (Alternatives Considered)</h2>
+        <p>Before creating yet another Result library, we evaluated existing options:</p>
+
+        <ul>
+            <li><strong>neverthrow:</strong> A solid library with a similar focus, but we had some API preferences that differed.</li>
+            <li><strong>ts-results:</strong> Well designed but appeared to be unmaintained at the time we evaluated it.</li>
+            <li><strong>True Myth:</strong> A comprehensive library with both Result and Maybe types, but we wanted something more lightweight.</li>
+            <li><strong><code>fp-ts</code>/<code>effect-ts</code>:</strong> These are fantastic, comprehensive libraries offering <code>Either</code> (similar to Result) and powerful effect systems. However, they represent a significant paradigm shift and dependency. We wanted something minimal and focused <em>just</em> on the <code>Result</code> pattern, serving as an easier incremental step for teams not ready for a full functional programming adoption.</li>
+            <li><strong>Custom Internal Solution:</strong> While we could continue evolving our internal <code>Result</code> type, we'd essentially be recreating Rust's well-designed API. By making this a separate library with a clear public API, we gained better separation of concerns and the ability to share with the community.</li>
+        </ul>
+
+        <p><code>ts-result</code> aims to fill that middle ground: a modern, focused, Rust-inspired <code>Result</code> implementation for everyday TypeScript error handling that doesn't require buying into a complete functional programming paradigm.</p>
+        
+        <p>We specifically aimed for a few key design goals:</p>
+        
+        <ul>
+            <li><strong>Rust-inspired naming:</strong> We deliberately kept Rust's method names like <code>andThen</code> rather than using alternatives like <code>bind</code> or <code>flatMap</code>. This was partly because we found Rust's names more self-explanatory and partly because many of our team members were familiar with Rust's conventions.</li>
+            <li><strong>Modern TypeScript features:</strong> Full support for ESM/CJS via package exports, extensive TypeScript type safety, and comprehensive JSDoc documentation.</li>
+            <li><strong>No additional dependencies:</strong> The library is entirely self-contained.</li>
+        </ul>
+
+        <div class="note">
+          <p><strong>What about <code>Promise</code> rejection?</strong> JavaScript's native <code>Promise</code> has a built-in success/failure model using rejections. However, rejections are best suited for exceptional, unexpected errors rather than representing expected failure states that are part of your domain logic. <code>Result</code> complements <code>Promise</code> by providing a way to model expected failures with rich type information, while still leveraging <code>Promise</code> for async operations.</p>
+        </div>
+
+        <h2>Practical Tips for Using Result in TypeScript</h2>
+
+        <p>Through our experience implementing and using <code>ts-result</code>, we've gathered some practical tips:</p>
+
+        <ul>
+            <li><strong>Define clear domain boundaries:</strong> Use Result primarily in your domain logic and service layers where you control the code patterns.</li>
+            <li><strong>Create adapter functions:</strong> Build utility functions like <code>catches()</code> to convert between exception-throwing code and Result-returning code.</li>
+            <li><strong>Be consistent with Promise handling:</strong> Decide whether your async functions will return <code>Result&lt;T, E&gt;</code> or <code>Promise&lt;Result&lt;T, E&gt;&gt;</code> and stick with it.</li>
+            <li><strong>Define your error types:</strong> Create custom error types that extend <code>Error</code> for better type checking in your error cases.</li>
+            <li><strong>Consider linting rules:</strong> If possible, create a linting rule to ensure Results are always handled (similar to how TypeScript can enforce Promise handling).</li>
+            <li><strong>Start small:</strong> Begin by applying the Result pattern to a single bounded context in your application before expanding it.</li>
+        </ul>
+
+        <h2>Conclusion</h2>
+        <p>Our journey reflects a common path: starting with basic error handling, identifying limitations, creating custom solutions, and eventually converging on established, robust patterns from other ecosystems. Implementing and open-sourcing <code>ts-result</code> was a natural step for us at Trylon AI, driven by our need for more explicit and composable error handling in TypeScript.</p>
+
+        <p>We find it significantly improves the clarity and reliability of our code where predictable success/failure outcomes are common. While it doesn't replace <code>try-catch</code> for truly exceptional runtime errors or magically solve all error handling complexities, it provides a powerful, type-safe tool for managing the expected failure paths within our application logic.</p>
+        
+        <p>Is this approach right for every project? Absolutely not. If your team is comfortable with exceptions or prefers other error handling patterns, that's perfectly valid. We've found that for our specific needs and preferences, the Result pattern offers a nice balance of explicitness, type safety, and composition that works well with our development style.</p>
+
+        <p>We hope <code>ts-result</code> might be useful for your projects too. And if you've built something similar or have thoughts on error handling in TypeScript, we'd love to hear about your experiences!</p>
+
+        <div class="links">
+            <strong>Check it out:</strong>
+            <ul>
+                <li><strong>GitHub:</strong> <a href="https://github.com/TrylonAI/ts-result">https://github.com/TrylonAI/ts-result</a></li>
+                <li><strong>npm:</strong> <code>npm install @trylonai/ts-result</code></li>
+            </ul>
+        </div>
+
+        <p>We'd love to hear your feedback and experiences!</p>
+    </main>
+    
+    <footer>
+        <p>&copy; 2025 Trylon AI. All rights reserved.</p>
+    </footer>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            document.querySelectorAll('pre code').forEach((block) => {
+                block.classList.add('typescript');
+                hljs.highlightElement(block);
+            });
+        });
+    </script>
+</body>
+</html>
